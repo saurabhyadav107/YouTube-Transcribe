@@ -159,9 +159,42 @@ class TestTranscriptService:
         mock_fallback.assert_called_once_with("dQw4w9WgXcQ", "en")
 
     def test_proxy_configuration_detection(self):
-        from services.transcript_service import get_configured_proxy_url
+        from services.transcript_service import get_configured_proxy_url, normalize_proxy_url
         with patch.dict("os.environ", {"YOUTUBE_PROXY": "http://user:pass@proxy.com:8080"}):
             assert get_configured_proxy_url() == "http://user:pass@proxy.com:8080"
+
+        # Webshare auto-rotation appending test
+        raw_ws = "http://ovlmrhyn:k391pjsr99xo@p.webshare.io:80"
+        normalized_ws = normalize_proxy_url(raw_ws)
+        assert normalized_ws == "http://ovlmrhyn-rotate:k391pjsr99xo@p.webshare.io:80"
+
+        # Already rotated Webshare URL remains unchanged
+        already_rot = "http://ovlmrhyn-rotate:k391pjsr99xo@p.webshare.io:80"
+        assert normalize_proxy_url(already_rot) == already_rot
+
+        # Direct IP proxy remains untouched
+        direct_ip = "http://ovlmrhyn:k391pjsr99xo@198.46.161.42:6134"
+        assert normalize_proxy_url(direct_ip) == direct_ip
+
+    @patch.object(TranscriptService, "_get_innertube_captions_list")
+    @patch.object(TranscriptService, "_get_transcript_list")
+    def test_request_blocked_triggers_fallback(self, mock_get_list, mock_fallback):
+        from youtube_transcript_api import RequestBlocked
+        from models.transcript_models import TranscriptLanguage
+        mock_get_list.side_effect = RequestBlocked("dQw4w9WgXcQ")
+        mock_fallback.return_value = [
+            TranscriptLanguage(
+                language="English",
+                language_code="en",
+                is_generated=False,
+                is_translatable=True,
+                is_original=True,
+                is_translated=False,
+            )
+        ]
+        available = TranscriptService.get_available_transcripts("dQw4w9WgXcQ")
+        assert len(available) == 1
+        mock_fallback.assert_called_once_with("dQw4w9WgXcQ")
 
     @patch.object(TranscriptService, "_get_transcript_list")
     def test_successful_transcript_extraction(self, mock_get_list):

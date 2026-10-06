@@ -18,6 +18,8 @@ from youtube_transcript_api import (
     YouTubeRequestFailed,
     InvalidVideoId,
     AgeRestricted,
+    RequestBlocked,
+    IpBlocked,
 )
 
 # Suppress urllib3 version warning if present
@@ -89,12 +91,37 @@ TranscriptError = TranscriptServiceError
 # Helper Functions: Proxy and HTTP Session Management
 # =============================================================================
 
+def normalize_proxy_url(proxy_url: Optional[str]) -> Optional[str]:
+    """
+    Ensure proxy URL is properly formatted.
+    For Webshare backbone (p.webshare.io), auto-appends -rotate if omitted
+    to prevent HTTP 407 Proxy Authentication Required errors.
+    """
+    if not proxy_url:
+        return None
+    url = str(proxy_url).strip()
+    if not url:
+        return None
+
+    # Handle Webshare backbone auto-rotation formatting:
+    # If using p.webshare.io and username doesn't already have -rotate or a session id, append -rotate
+    if "p.webshare.io" in url and "@" in url:
+        match = re.match(r"^(https?://)([^:]+):([^@]+)@(p\.webshare\.io(?::\d+)?(?:/.*)?)$", url)
+        if match:
+            scheme, username, password, host_part = match.groups()
+            if not username.endswith("-rotate") and not re.search(r"-\d+$", username):
+                username = f"{username}-rotate"
+                return f"{scheme}{username}:{password}@{host_part}"
+    return url
+
+
 def get_configured_proxy_url() -> Optional[str]:
     """
     Retrieve configured proxy URL from Streamlit secrets or system environment variables.
     Supports:
       - st.secrets["YOUTUBE_PROXY"]
       - st.secrets["youtube"]["proxy"]
+      - st.secrets["webshare"] (dict with username and password)
       - os.environ["YOUTUBE_PROXY"]
       - os.environ["HTTPS_PROXY"]
       - os.environ["HTTP_PROXY"]
@@ -105,22 +132,27 @@ def get_configured_proxy_url() -> Optional[str]:
             if "YOUTUBE_PROXY" in st.secrets:
                 proxy_val = str(st.secrets["YOUTUBE_PROXY"]).strip()
                 if proxy_val:
-                    return proxy_val
+                    return normalize_proxy_url(proxy_val)
             if "youtube" in st.secrets and isinstance(st.secrets["youtube"], dict):
                 proxy_val = str(st.secrets["youtube"].get("proxy", "")).strip()
                 if proxy_val:
-                    return proxy_val
+                    return normalize_proxy_url(proxy_val)
+            if "webshare" in st.secrets and isinstance(st.secrets["webshare"], dict):
+                ws_user = str(st.secrets["webshare"].get("username", "")).strip()
+                ws_pass = str(st.secrets["webshare"].get("password", "")).strip()
+                if ws_user and ws_pass:
+                    return normalize_proxy_url(f"http://{ws_user}:{ws_pass}@p.webshare.io:80")
     except Exception:
         pass
 
     env_proxy = os.environ.get("YOUTUBE_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
     if env_proxy and env_proxy.strip():
-        return env_proxy.strip()
+        return normalize_proxy_url(env_proxy.strip())
 
     return None
 
 
-def create_resilient_session() -> requests.Session:
+def create_resilient_session(proxy_url: Optional[str] = None) -> requests.Session:
     """
     Create a requests Session with modern browser headers and configured proxy.
     Browser headers and gzip/deflate support are essential to prevent YouTube
@@ -136,11 +168,11 @@ def create_resilient_session() -> requests.Session:
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate",
     })
-    proxy_url = get_configured_proxy_url()
-    if proxy_url:
+    active_proxy = proxy_url or get_configured_proxy_url()
+    if active_proxy:
         session.proxies.update({
-            "http": proxy_url,
-            "https": proxy_url,
+            "http": active_proxy,
+            "https": active_proxy,
         })
     return session
 
@@ -153,9 +185,9 @@ class TranscriptService:
     """Service for querying and extracting YouTube transcripts with multi-tier fallback."""
 
     @classmethod
-    def _create_session(cls) -> requests.Session:
+    def _create_session(cls, proxy_url: Optional[str] = None) -> requests.Session:
         """Create configured HTTP session."""
-        return create_resilient_session()
+        return create_resilient_session(proxy_url=proxy_url)
 
     @classmethod
     def _get_api(cls):
@@ -165,11 +197,25 @@ class TranscriptService:
 
         proxy_config = None
         if proxy_url:
-            try:
-                from youtube_transcript_api.proxies import GenericProxyConfig
-                proxy_config = GenericProxyConfig(http_url=proxy_url, https_url=proxy_url)
-            except Exception:
-                pass
+            # Check for Webshare proxy
+            if "p.webshare.io" in proxy_url and "@" in proxy_url:
+                try:
+                    from youtube_transcript_api.proxies import WebshareProxyConfig
+                    match = re.match(r"^https?://([^:]+):([^@]+)@p\.webshare\.io", proxy_url)
+                    if match:
+                        u, p = match.group(1), match.group(2)
+                        if u.endswith("-rotate"):
+                            u = u[:-7]
+                        proxy_config = WebshareProxyConfig(proxy_username=u, proxy_password=p)
+                except Exception:
+                    pass
+
+            if proxy_config is None:
+                try:
+                    from youtube_transcript_api.proxies import GenericProxyConfig
+                    proxy_config = GenericProxyConfig(http_url=proxy_url, https_url=proxy_url)
+                except Exception:
+                    pass
 
         try:
             if proxy_config:
@@ -200,7 +246,9 @@ class TranscriptService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _fetch_innertube_player_data(cls, video_id: str) -> dict:
+    def _fetch_innertube_player_data(
+        cls, video_id: str, session: Optional[requests.Session] = None
+    ) -> Tuple[dict, requests.Session]:
         """
         Query YouTube's InnerTube Android Player endpoint to retrieve player metadata
         and captionTracks directly without loading the desktop HTML watch page.
@@ -221,9 +269,9 @@ class TranscriptService:
             },
             "videoId": video_id,
         }
-        session = cls._create_session()
+        active_session = session or cls._create_session()
         try:
-            resp = session.post(url, headers=headers, json=payload, timeout=(10, 25))
+            resp = active_session.post(url, headers=headers, json=payload, timeout=(10, 25))
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as req_err:
@@ -241,14 +289,14 @@ class TranscriptService:
             else:
                 logger.warning("InnerTube video playability status for %s: %s (%s)", video_id, status, reason)
 
-        return data
+        return data, active_session
 
     @classmethod
     def _get_innertube_captions_list(cls, video_id: str) -> List[TranscriptLanguage]:
         """
         Extract available subtitle tracks using the InnerTube Android API.
         """
-        data = cls._fetch_innertube_player_data(video_id)
+        data, _ = cls._fetch_innertube_player_data(video_id)
         raw_tracks = (
             data.get("captions", {})
             .get("playerCaptionsTracklistRenderer", {})
@@ -313,8 +361,10 @@ class TranscriptService:
     ) -> TranscriptResult:
         """
         Download and parse transcript snippets directly from InnerTube timedtext stream.
+        Reuses the active HTTP session for connection keep-alive and IP session persistence.
         """
-        data = cls._fetch_innertube_player_data(video_id)
+        session = cls._create_session()
+        data, session = cls._fetch_innertube_player_data(video_id, session=session)
         raw_tracks = (
             data.get("captions", {})
             .get("playerCaptionsTracklistRenderer", {})
@@ -350,7 +400,6 @@ class TranscriptService:
         if not base_url:
             raise NoTranscriptFound(video_id, [], None)
 
-        session = cls._create_session()
         try:
             # Subtitle download can be over 1MB on multi-hour videos; allow up to 45s read timeout
             cap_resp = session.get(base_url, timeout=(10, 45))
@@ -534,7 +583,7 @@ class TranscriptService:
                 "The video may be private, removed, age-restricted, or unavailable in your region.",
                 str(exc),
             ) from exc
-        except (CouldNotRetrieveTranscript, YouTubeRequestFailed) as exc:
+        except (CouldNotRetrieveTranscript, YouTubeRequestFailed, RequestBlocked, IpBlocked) as exc:
             logger.warning(
                 "Standard API connection issue for %s: %s. Attempting InnerTube fallback...",
                 video_id,
@@ -670,7 +719,7 @@ class TranscriptService:
 
         except (TranscriptsDisabled, VideoUnavailable, AgeRestricted, InvalidVideoId, LanguageUnavailableError):
             raise
-        except (CouldNotRetrieveTranscript, YouTubeRequestFailed) as exc:
+        except (CouldNotRetrieveTranscript, YouTubeRequestFailed, RequestBlocked, IpBlocked) as exc:
             logger.warning(
                 "Standard API connection issue extracting %s: %s. Attempting InnerTube fallback...",
                 video_id,
