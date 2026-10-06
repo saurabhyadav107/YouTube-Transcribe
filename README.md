@@ -56,7 +56,7 @@ SpeechToText1/
 │   ├── styles.py               # Modern SaaS CSS styling
 │   └── components.py           # Cards, headers, transcript viewer & buttons
 │
-└── tests/                      # Automated test suite (59 unit tests)
+└── tests/                      # Automated test suite (60 unit tests)
     ├── __init__.py
     ├── test_url_utils.py
     ├── test_transcript_utils.py

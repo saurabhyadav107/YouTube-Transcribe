@@ -79,11 +79,24 @@ class TestTranscriptService:
 
         available = TranscriptService.get_available_transcripts("dQw4w9WgXcQ")
         assert len(available) == 2
-        # Manual should be sorted first
-        assert available[0].language_code == "en"
+        # Original spoken video language (es) is prioritized and placed first
+        assert available[0].language_code == "es"
+        assert available[0].is_original is True
+        assert available[1].language_code == "en"
+        assert available[1].is_original is False
+
+    @patch.object(TranscriptService, "_get_transcript_list")
+    def test_original_language_manual_preferred(self, mock_get_list):
+        # When creator provided manual track in video's native language (es), prefer manual
+        manual_es = self._create_mock_transcript(lang="Spanish", code="es", is_generated=False)
+        auto_es = self._create_mock_transcript(lang="Spanish", code="es", is_generated=True)
+        manual_en = self._create_mock_transcript(lang="English", code="en", is_generated=False)
+        mock_get_list.return_value = [auto_es, manual_es, manual_en]
+
+        available = TranscriptService.get_available_transcripts("dQw4w9WgXcQ")
+        assert available[0].language_code == "es"
         assert available[0].is_generated is False
-        assert available[1].language_code == "es"
-        assert available[1].is_generated is True
+        assert available[0].is_original is True
 
     @patch.object(TranscriptService, "_get_transcript_list")
     def test_transcripts_disabled_error_mapping(self, mock_get_list):

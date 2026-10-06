@@ -62,6 +62,8 @@ class TranscriptLanguage:
     language_code: str
     is_generated: bool
     is_translatable: bool = False
+    is_original: bool = False
+    is_translated: bool = False
 
     @property
     def flag(self) -> str:
@@ -73,8 +75,14 @@ class TranscriptLanguage:
     @property
     def display_name(self) -> str:
         """Formatted display name for UI dropdowns."""
-        track_type = "Auto-generated" if self.is_generated else "Manual"
-        return f"{self.flag} {self.language} ({self.language_code}) — {track_type}"
+        if self.is_original:
+            track_type = "Manual" if not self.is_generated else "Auto"
+            return f"{self.flag} {self.language} ({self.language_code}) ★ [Original Video Language] • {track_type}"
+        elif self.is_translated:
+            return f"{self.flag} {self.language} ({self.language_code}) • Translated"
+        else:
+            track_type = "Auto" if self.is_generated else "Manual"
+            return f"{self.flag} {self.language} ({self.language_code}) • {track_type}"
 
 
 @dataclass(frozen=True)

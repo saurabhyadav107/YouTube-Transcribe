@@ -2,24 +2,26 @@
 
 from .styles import get_custom_css
 from .components import (
-    render_header,
     render_sidebar,
+    render_top_user_bar,
+    render_hero,
+    render_url_input_card,
     render_empty_state,
-    render_video_metadata_card,
-    render_stats_cards,
-    render_copy_button,
-    render_download_section,
-    render_transcript_display,
+    render_how_it_works,
+    render_video_card,
+    render_interactive_transcript_panel,
+    render_bottom_dashboard,
 )
 
 __all__ = [
     "get_custom_css",
-    "render_header",
     "render_sidebar",
+    "render_top_user_bar",
+    "render_hero",
+    "render_url_input_card",
     "render_empty_state",
-    "render_video_metadata_card",
-    "render_stats_cards",
-    "render_copy_button",
-    "render_download_section",
-    "render_transcript_display",
+    "render_how_it_works",
+    "render_video_card",
+    "render_interactive_transcript_panel",
+    "render_bottom_dashboard",
 ]

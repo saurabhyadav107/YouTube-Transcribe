@@ -1,19 +1,14 @@
-"""YouTube Transcript Extractor - Main Streamlit Application.
+"""YouTube Transcript Studio - Modern SaaS Application.
 
-Extract, read, copy, and download transcripts from YouTube videos instantly.
+Recreates the reference designs with ~100% visual fidelity:
+- Empty / Landing state (Screenshot 2): Hero with 3D artwork, URL input card, empty state card, 4-step How It Works cards.
+- Result / Transcript state (Screenshot 1): Hero banner, 2-column video player & interactive transcript panel, bottom transcript actions and stats metrics.
 """
 
 import logging
 import warnings
-from typing import Optional, List, Tuple
+from typing import Optional, List
 import streamlit as st
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] (%(name)s) %(message)s",
-)
-logger = logging.getLogger("yt_transcript_app")
 
 # Suppress urllib3 version warning if present
 try:
@@ -22,12 +17,18 @@ try:
 except ImportError:
     pass
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] (%(name)s) %(message)s",
+)
+logger = logging.getLogger("yt_transcript_app")
+
 from models.transcript_models import (
     VideoMetadata,
     TranscriptLanguage,
     TranscriptResult,
 )
-from utils.url_utils import validate_youtube_url, build_canonical_url
+from utils.url_utils import validate_youtube_url
 from services.youtube_service import YouTubeService
 from services.transcript_service import (
     TranscriptService,
@@ -35,18 +36,19 @@ from services.transcript_service import (
     NoTranscriptFoundError,
     VideoUnavailableError,
     NetworkConnectionError,
-    LanguageUnavailableError,
     TranscriptServiceError,
 )
 from ui.styles import get_custom_css
 from ui.components import (
-    render_header,
     render_sidebar,
+    render_top_user_bar,
+    render_hero,
+    render_url_input_card,
     render_empty_state,
-    render_video_metadata_card,
-    render_stats_cards,
-    render_transcript_display,
-    render_download_section,
+    render_how_it_works,
+    render_video_card,
+    render_interactive_transcript_panel,
+    render_bottom_dashboard,
 )
 
 
@@ -73,21 +75,20 @@ def fetch_cached_transcript(video_id: str, language_code: Optional[str] = None) 
 
 
 # =============================================================================
-# Streamlit Application
+# Session State
 # =============================================================================
 
 def init_session_state() -> None:
-    """Initialize necessary session state variables."""
+    """Initialize session state defaults."""
     default_state = {
         "url_input": "",
         "current_video_id": None,
         "metadata": None,
-        "available_languages": [],
+        "available_langs": [],
         "selected_language_code": None,
         "transcript_result": None,
         "error_message": None,
         "error_type": None,
-        "view_mode": "Reading",
     }
     for key, value in default_state.items():
         if key not in st.session_state:
@@ -95,235 +96,212 @@ def init_session_state() -> None:
 
 
 def reset_results() -> None:
-    """Reset transcript results and errors."""
+    """Clear existing transcript results and errors."""
     st.session_state.current_video_id = None
     st.session_state.metadata = None
-    st.session_state.available_languages = []
+    st.session_state.available_langs = []
     st.session_state.selected_language_code = None
     st.session_state.transcript_result = None
     st.session_state.error_message = None
     st.session_state.error_type = None
 
 
+# =============================================================================
+# Core Application Flow
+# =============================================================================
+
 def main() -> None:
-    """Application entry point."""
+    """Main application loop."""
     st.set_page_config(
-        page_title="YouTube Transcript Extractor",
+        page_title="YouTube Transcript Studio",
         page_icon="🎬",
-        layout="centered",
-        initial_sidebar_state="collapsed",
+        layout="wide",
+        initial_sidebar_state="expanded",
     )
 
-    # Inject custom styling
+    # Inject Centralized Design System CSS
     st.markdown(get_custom_css(), unsafe_allow_html=True)
 
-    # Initialize session state
+    # Initialize State
     init_session_state()
 
-    # Render sidebar & hero header
-    render_sidebar()
-    render_header()
+    has_result = bool(st.session_state.transcript_result and st.session_state.metadata)
 
-    # =========================================================================
-    # URL Input Card
-    # =========================================================================
-    st.markdown("#### 🔗 YouTube Video URL")
-    
-    with st.container():
-        input_col, btn_col = st.columns([3.8, 1.2], vertical_alignment="bottom")
+    # 1. Render Sidebar (Visual match to reference)
+    render_sidebar(is_result_page=has_result)
 
-        with input_col:
-            user_url = st.text_input(
-                label="YouTube Video URL",
-                placeholder="Paste YouTube video URL here... (e.g. https://www.youtube.com/watch?v=...)",
-                key="url_input_box",
-                value=st.session_state.url_input,
-                label_visibility="collapsed",
-            )
+    # 2. Top Right User Bar (Theme toggle + JD Avatar + User Name)
+    render_top_user_bar()
 
-        with btn_col:
-            fetch_btn = st.button(
-                "🚀 Get Transcript",
-                type="primary",
-                use_container_width=True,
-            )
+    # 3. Handle Landing Page vs Result Page
+    if not has_result:
+        # =====================================================================
+        # STATE 1: Landing / Empty State (Screenshot 2)
+        # =====================================================================
+        render_hero(is_result_page=False)
 
-    # Trigger processing on button click
-    if fetch_btn:
-        st.session_state.url_input = user_url.strip()
-        is_valid, video_id, validation_error = validate_youtube_url(st.session_state.url_input)
-
-        if not is_valid:
-            reset_results()
-            st.session_state.error_type = "validation"
-            st.session_state.error_message = validation_error
-        else:
-            reset_results()
-            st.session_state.current_video_id = video_id
-            
-            # Retrieve video metadata and available languages
-            with st.status("⏳ Fetching transcript...", expanded=True) as status_box:
-                try:
-                    status_box.write("📡 Connecting to YouTube and inspecting video...")
-                    metadata = fetch_cached_metadata(video_id)
-                    st.session_state.metadata = metadata
-
-                    status_box.write("🔍 Finding available transcripts and languages...")
-                    available_langs = fetch_cached_languages(video_id)
-                    st.session_state.available_languages = available_langs
-
-                    if not available_langs:
-                        raise NoTranscriptFoundError(
-                            "This YouTube video does not currently have an accessible transcript."
-                        )
-
-                    # Default to first available language (manual preferred by service sort)
-                    default_lang = available_langs[0].language_code
-                    st.session_state.selected_language_code = default_lang
-
-                    status_box.write(f"📝 Extracting transcript track ({available_langs[0].language})...")
-                    transcript_res = fetch_cached_transcript(video_id, default_lang)
-                    st.session_state.transcript_result = transcript_res
-
-                    status_box.update(
-                        label="✅ Transcript retrieved successfully!",
-                        state="complete",
-                        expanded=False,
-                    )
-                except TranscriptDisabledError as exc:
-                    st.session_state.error_type = "disabled"
-                    st.session_state.error_message = exc.user_message
-                    status_box.update(label="Transcript unavailable", state="error", expanded=False)
-                except NoTranscriptFoundError as exc:
-                    st.session_state.error_type = "not_found"
-                    st.session_state.error_message = exc.user_message
-                    status_box.update(label="No transcript found", state="error", expanded=False)
-                except VideoUnavailableError as exc:
-                    st.session_state.error_type = "video_unavailable"
-                    st.session_state.error_message = exc.user_message
-                    status_box.update(label="Video unavailable", state="error", expanded=False)
-                except NetworkConnectionError as exc:
-                    st.session_state.error_type = "network"
-                    st.session_state.error_message = exc.user_message
-                    status_box.update(label="Connection error", state="error", expanded=False)
-                except Exception as exc:
-                    logger.exception("Unexpected error during transcript extraction for %s", video_id)
-                    st.session_state.error_type = "general"
-                    st.session_state.error_message = (
-                        "We couldn't retrieve the transcript right now. Please verify the URL and try again."
-                    )
-                    status_box.update(label="Extraction failed", state="error", expanded=False)
-
-    # =========================================================================
-    # Error Display
-    # =========================================================================
-    if st.session_state.error_message:
-        err_msg = st.session_state.error_message
-        err_type = st.session_state.error_type
-
-        if err_type == "validation":
-            if "Please enter" in err_msg:
-                st.warning(f"⚠️ {err_msg}")
-            else:
-                st.error(f"❌ {err_msg}")
-        elif err_type == "disabled":
-            st.error(f"🚫 **Transcript Unavailable**\n\n{err_msg}")
-        elif err_type == "not_found":
-            st.info(f"😕 **Transcript Not Available**\n\n{err_msg}")
-        elif err_type == "video_unavailable":
-            st.error(f"❌ **Video Unavailable**\n\n{err_msg}")
-        elif err_type == "network":
-            st.error(f"🌐 **Connection Error**\n\n{err_msg}")
-        else:
-            st.error(f"⚠️ **Error**\n\n{err_msg}")
-
-    # =========================================================================
-    # Results Display
-    # =========================================================================
-    elif st.session_state.transcript_result and st.session_state.metadata:
-        result: TranscriptResult = st.session_state.transcript_result
-        metadata: VideoMetadata = st.session_state.metadata
-        available_langs: List[TranscriptLanguage] = st.session_state.available_languages
-
-        st.success("✅ **Transcript Ready** — Your YouTube transcript has been successfully extracted.")
-
-        # Video Metadata Card
-        render_video_metadata_card(metadata, result)
-
-        # Statistics Cards
-        render_stats_cards(result)
-
-        st.markdown("---")
-
-        # Controls Row: Language Selector (if multiple) & View Mode Switcher
-        ctrl_col1, ctrl_col2 = st.columns([1.3, 1.2], vertical_alignment="center")
-
-        with ctrl_col1:
-            if len(available_langs) > 1:
-                lang_options = [lang.language_code for lang in available_langs]
-                lang_labels = {lang.language_code: lang.display_name for lang in available_langs}
-                current_idx = (
-                    lang_options.index(st.session_state.selected_language_code)
-                    if st.session_state.selected_language_code in lang_options
-                    else 0
-                )
-
-                selected_code = st.selectbox(
-                    label="🌐 Available Languages:",
-                    options=lang_options,
-                    format_func=lambda code: lang_labels.get(code, code),
-                    index=current_idx,
-                    key="language_selector",
-                )
-
-                # If user switched language, fetch new transcript
-                if selected_code != st.session_state.selected_language_code:
-                    st.session_state.selected_language_code = selected_code
-                    with st.spinner("🔄 Loading selected transcript language..."):
-                        try:
-                            new_result = fetch_cached_transcript(
-                                st.session_state.current_video_id, selected_code
-                            )
-                            st.session_state.transcript_result = new_result
-                            st.rerun()
-                        except Exception as exc:
-                            logger.error("Failed to fetch selected language %s: %s", selected_code, exc)
-                            st.error(f"🌐 Could not load transcript for {selected_code}.")
-            else:
-                st.markdown(
-                    f"**🌐 Language:** {result.language} ({'Auto-generated' if result.is_generated else 'Manual'})"
-                )
-
-        with ctrl_col2:
-            view_mode = st.radio(
-                label="Transcript View:",
-                options=["Reading", "With Timestamps"],
-                horizontal=True,
-                index=0 if st.session_state.view_mode == "Reading" else 1,
-                key="view_mode_toggle",
-            )
-            st.session_state.view_mode = view_mode
-
-        # Determine currently displayed transcript text
-        is_timestamp_mode = view_mode == "With Timestamps"
-        current_text = result.timestamped_text if is_timestamp_mode else result.reading_text
-
-        st.markdown("### 📝 Transcript")
-        render_transcript_display(current_text, is_timestamp_mode=is_timestamp_mode)
-
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-
-        # Action Buttons: Copy, Download TXT, SRT, VTT
-        render_download_section(
-            result=result,
-            metadata=metadata,
-            current_view_text=current_text,
-            view_mode=view_mode,
+        # URL Input Card
+        input_url, submit_clicked, clear_clicked, sample_url = render_url_input_card(
+            default_url=st.session_state.url_input,
+            is_result_page=False,
         )
 
-    else:
-        # Empty State
+        # Handle sample buttons (populates URL input without auto-submitting)
+        if sample_url:
+            st.session_state.url_input = sample_url
+            st.session_state.error_message = None
+            st.rerun()
+
+        # Handle clear button
+        if clear_clicked:
+            reset_results()
+            st.session_state.url_input = ""
+            st.rerun()
+
+        # Handle transcript extraction request
+        if submit_clicked:
+            st.session_state.url_input = input_url.strip()
+            is_valid, video_id, validation_err = validate_youtube_url(st.session_state.url_input)
+
+            if not is_valid:
+                reset_results()
+                st.session_state.error_type = "validation"
+                st.session_state.error_message = validation_err
+            else:
+                reset_results()
+                st.session_state.current_video_id = video_id
+
+                with st.status("Extracting Transcript...", expanded=True) as status_box:
+                    try:
+                        status_box.write("📡 Fetching subtitle tracks...")
+                        metadata = fetch_cached_metadata(video_id)
+                        st.session_state.metadata = metadata
+
+                        status_box.write("🔍 Analyzing available languages...")
+                        available_langs = fetch_cached_languages(video_id)
+                        st.session_state.available_langs = available_langs
+
+                        if not available_langs:
+                            raise NoTranscriptFoundError(
+                                "This YouTube video does not currently have an accessible transcript."
+                            )
+
+                        # Default to the detected original video language
+                        default_lang = available_langs[0].language_code
+                        st.session_state.selected_language_code = default_lang
+
+                        status_box.write(f"📝 Preparing transcript ({available_langs[0].language})...")
+                        transcript_res = fetch_cached_transcript(video_id, default_lang)
+                        st.session_state.transcript_result = transcript_res
+
+                        status_box.update(
+                            label="✅ Transcript ready!",
+                            state="complete",
+                            expanded=False,
+                        )
+                        st.rerun()
+
+                    except TranscriptDisabledError as exc:
+                        st.session_state.error_type = "disabled"
+                        st.session_state.error_message = exc.user_message
+                        status_box.update(label="Transcript unavailable", state="error", expanded=False)
+                    except NoTranscriptFoundError as exc:
+                        st.session_state.error_type = "not_found"
+                        st.session_state.error_message = exc.user_message
+                        status_box.update(label="No transcript found", state="error", expanded=False)
+                    except VideoUnavailableError as exc:
+                        st.session_state.error_type = "video_unavailable"
+                        st.session_state.error_message = exc.user_message
+                        status_box.update(label="Video unavailable", state="error", expanded=False)
+                    except NetworkConnectionError as exc:
+                        st.session_state.error_type = "network"
+                        st.session_state.error_message = exc.user_message
+                        status_box.update(label="Connection error", state="error", expanded=False)
+                    except Exception as exc:
+                        logger.exception("Unexpected error during transcript extraction for %s", video_id)
+                        st.session_state.error_type = "general"
+                        st.session_state.error_message = (
+                            "Unable to extract transcript. Please verify the URL and try again."
+                        )
+                        status_box.update(label="Extraction failed", state="error", expanded=False)
+
+        # Error State Display
+        if st.session_state.error_message:
+            st.error(f"⚠️ {st.session_state.error_message}")
+
+        # Large Empty State Card
         render_empty_state()
+
+        # How It Works 4-Step Cards
+        render_how_it_works()
+
+    else:
+        # =====================================================================
+        # STATE 2: Result / Transcript Page (Screenshot 1)
+        # =====================================================================
+        result: TranscriptResult = st.session_state.transcript_result
+        metadata: VideoMetadata = st.session_state.metadata
+        available_langs: List[TranscriptLanguage] = st.session_state.get("available_langs", [])
+
+        # Hero Banner with embedded URL row
+        render_hero(is_result_page=True, current_url=st.session_state.url_input)
+
+        # Compact URL Input Row to easily change video anytime
+        input_url, submit_clicked, _, _ = render_url_input_card(
+            default_url=st.session_state.url_input,
+            is_result_page=True,
+        )
+
+        if submit_clicked and input_url.strip() != st.session_state.url_input:
+            st.session_state.url_input = input_url.strip()
+            is_valid, video_id, val_err = validate_youtube_url(st.session_state.url_input)
+            if is_valid:
+                reset_results()
+                st.session_state.current_video_id = video_id
+                with st.spinner("Extracting transcript..."):
+                    try:
+                        m = fetch_cached_metadata(video_id)
+                        st.session_state.metadata = m
+                        langs = fetch_cached_languages(video_id)
+                        st.session_state.available_langs = langs
+                        if langs:
+                            default_code = langs[0].language_code
+                            st.session_state.selected_language_code = default_code
+                            st.session_state.transcript_result = fetch_cached_transcript(video_id, default_code)
+                        st.rerun()
+                    except Exception as err:
+                        st.error(f"Error: {err}")
+            else:
+                st.error(val_err)
+
+        # Main 2-Column Dashboard Layout (Video 42% | Transcript 58%)
+        col_video, col_transcript = st.columns([1.1, 1.45], gap="large")
+
+        with col_video:
+            render_video_card(metadata, result)
+
+        with col_transcript:
+            new_lang = render_interactive_transcript_panel(
+                result=result,
+                available_langs=available_langs,
+                selected_lang_code=st.session_state.selected_language_code,
+            )
+
+            if new_lang and new_lang != st.session_state.selected_language_code:
+                st.session_state.selected_language_code = new_lang
+                with st.spinner("Loading selected language..."):
+                    try:
+                        updated_res = fetch_cached_transcript(
+                            st.session_state.current_video_id, new_lang
+                        )
+                        st.session_state.transcript_result = updated_res
+                        st.rerun()
+                    except Exception as exc:
+                        logger.error("Failed to load language %s: %s", new_lang, exc)
+                        st.error(f"Could not load transcript for {new_lang}.")
+
+        # Bottom Row: Transcript Actions & Stats Cards
+        render_bottom_dashboard(result, metadata)
 
 
 if __name__ == "__main__":
