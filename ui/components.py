@@ -797,7 +797,7 @@ def render_interactive_transcript_panel(
 
             function renderRows(items) {{
                 const container = document.getElementById("scrollContainer");
-                container.innerHTML = "";
+                const fragment = document.createDocumentFragment();
                 items.forEach((seg, idx) => {{
                     const row = document.createElement("div");
                     const isActive = (idx === activeIndex);
@@ -807,7 +807,7 @@ def render_interactive_transcript_panel(
 
                     const badge = document.createElement("div");
                     badge.className = "time-badge";
-                    badge.innerHTML = (isActive ? "▶ " : "") + seg.timestamp;
+                    badge.textContent = (isActive ? "▶ " : "") + seg.timestamp;
 
                     const text = document.createElement("div");
                     text.className = "row-text";
@@ -815,27 +815,33 @@ def render_interactive_transcript_panel(
 
                     row.appendChild(badge);
                     row.appendChild(text);
-                    container.appendChild(row);
+                    fragment.appendChild(row);
                 }});
+                container.innerHTML = "";
+                container.appendChild(fragment);
             }}
 
             function selectRow(idx) {{
-                activeIndex = idx;
-                const rows = document.querySelectorAll(".row-entry");
-                rows.forEach((r, i) => {{
-                    const badge = r.querySelector(".time-badge");
-                    if (i === idx) {{
-                        r.classList.add("active");
-                        badge.innerHTML = "▶ " + segments[i].timestamp;
-                    }} else {{
-                        r.classList.remove("active");
-                        badge.innerHTML = segments[i].timestamp;
+                if (activeIndex !== idx) {{
+                    const prevRow = document.getElementById("row-" + activeIndex);
+                    if (prevRow) {{
+                        prevRow.classList.remove("active");
+                        const prevBadge = prevRow.querySelector(".time-badge");
+                        if (prevBadge && segments[activeIndex]) {{
+                            prevBadge.textContent = segments[activeIndex].timestamp;
+                        }}
                     }}
-                }});
+                    activeIndex = idx;
+                }}
 
-                if (autoScrollEnabled) {{
-                    const target = document.getElementById("row-" + idx);
-                    if (target) {{
+                const target = document.getElementById("row-" + idx);
+                if (target) {{
+                    target.classList.add("active");
+                    const targetBadge = target.querySelector(".time-badge");
+                    if (targetBadge && segments[idx]) {{
+                        targetBadge.textContent = "▶ " + segments[idx].timestamp;
+                    }}
+                    if (autoScrollEnabled) {{
                         target.scrollIntoView({{ behavior: "smooth", block: "center" }});
                     }}
                 }}
