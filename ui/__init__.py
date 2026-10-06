@@ -1,4 +1,10 @@
-"""Streamlit UI styling and components."""
+import importlib
+import sys
+
+if "ui.styles" in sys.modules:
+    importlib.reload(sys.modules["ui.styles"])
+if "ui.components" in sys.modules:
+    importlib.reload(sys.modules["ui.components"])
 
 from .styles import get_custom_css
 from .components import (

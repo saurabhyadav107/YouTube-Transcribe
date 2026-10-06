@@ -38,6 +38,15 @@ from services.transcript_service import (
     NetworkConnectionError,
     TranscriptServiceError,
 )
+import importlib
+import sys
+
+# Ensure UI submodules are refreshed if already in memory (handles Streamlit Cloud hot-reloads)
+if "ui.components" in sys.modules:
+    importlib.reload(sys.modules["ui.components"])
+if "ui.styles" in sys.modules:
+    importlib.reload(sys.modules["ui.styles"])
+
 from ui.styles import get_custom_css
 from ui.components import (
     render_sidebar,
