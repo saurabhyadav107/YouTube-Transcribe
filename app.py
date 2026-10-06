@@ -46,10 +46,13 @@ if "ui.components" in sys.modules:
     importlib.reload(sys.modules["ui.components"])
 if "ui.styles" in sys.modules:
     importlib.reload(sys.modules["ui.styles"])
+if "ui.tab_views" in sys.modules:
+    importlib.reload(sys.modules["ui.tab_views"])
 
 from ui.styles import get_custom_css
 from ui.components import (
     render_sidebar,
+    render_top_navigation_tabs,
     render_top_user_bar,
     render_hero,
     render_url_input_card,
@@ -58,6 +61,14 @@ from ui.components import (
     render_video_card,
     render_interactive_transcript_panel,
     render_bottom_dashboard,
+)
+from ui.tab_views import (
+    render_how_it_works_view,
+    render_supported_links_view,
+    render_export_options_view,
+    render_faq_view,
+    render_about_view,
+    render_feedback_view,
 )
 
 
@@ -90,6 +101,7 @@ def fetch_cached_transcript(video_id: str, language_code: Optional[str] = None) 
 def init_session_state() -> None:
     """Initialize session state defaults."""
     default_state = {
+        "active_view": "transcribe",
         "url_input": "",
         "current_video_id": None,
         "metadata": None,
@@ -98,6 +110,7 @@ def init_session_state() -> None:
         "transcript_result": None,
         "error_message": None,
         "error_type": None,
+        "feedback_submissions": [],
     }
     for key, value in default_state.items():
         if key not in st.session_state:
@@ -134,16 +147,32 @@ def main() -> None:
     # Initialize State
     init_session_state()
 
+    active_view = st.session_state.get("active_view", "transcribe")
     has_result = bool(st.session_state.transcript_result and st.session_state.metadata)
 
-    # 1. Render Sidebar (Visual match to reference)
-    render_sidebar(is_result_page=has_result)
+    # 1. Render Sidebar (Interactive with active item highlighted)
+    render_sidebar(is_result_page=has_result, active_view=active_view)
 
     # 2. Top Right User Bar (Theme toggle + JD Avatar + User Name)
     render_top_user_bar()
 
-    # 3. Handle Landing Page vs Result Page
-    if not has_result:
+    # 3. Horizontal Navigation Tabs (Clickable tabs at the top of content)
+    render_top_navigation_tabs(active_view=active_view)
+
+    # 4. View Routing
+    if active_view == "how_it_works":
+        render_how_it_works_view()
+    elif active_view == "supported_links":
+        render_supported_links_view()
+    elif active_view == "export_options":
+        render_export_options_view()
+    elif active_view == "faq":
+        render_faq_view()
+    elif active_view == "about":
+        render_about_view()
+    elif active_view == "feedback":
+        render_feedback_view()
+    elif not has_result:
         # =====================================================================
         # STATE 1: Landing / Empty State (Screenshot 2)
         # =====================================================================

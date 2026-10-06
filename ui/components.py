@@ -72,8 +72,8 @@ def render_html(html_str: str) -> None:
 # 1. Sidebar Component
 # =============================================================================
 
-def render_sidebar(is_result_page: bool = False) -> None:
-    """Render the sidebar matching the reference screenshots with crisp vector icons."""
+def render_sidebar(is_result_page: bool = False, active_view: str = "transcribe") -> None:
+    """Render the sidebar with interactive clickable navigation matching reference design."""
     yt_logo_b64 = get_yt_logo_b64()
 
     with st.sidebar:
@@ -92,37 +92,82 @@ def render_sidebar(is_result_page: bool = False) -> None:
             """
         )
 
-        # Nav items
+        # Primary Navigation Items
+        if st.sidebar.button(
+            "Home",
+            icon=":material/home:",
+            key="sb_btn_home",
+            width="stretch",
+            type="primary" if active_view == "transcribe" else "secondary",
+        ):
+            st.session_state["active_view"] = "transcribe"
+            st.rerun()
+
+        if st.sidebar.button(
+            "About",
+            icon=":material/info:",
+            key="sb_btn_about",
+            width="stretch",
+            type="primary" if active_view == "about" else "secondary",
+        ):
+            st.session_state["active_view"] = "about"
+            st.rerun()
+
+        if st.sidebar.button(
+            "How it Works",
+            icon=":material/help:",
+            key="sb_btn_how_it_works",
+            width="stretch",
+            type="primary" if active_view == "how_it_works" else "secondary",
+        ):
+            st.session_state["active_view"] = "how_it_works"
+            st.rerun()
+
+        if st.sidebar.button(
+            "Export Options",
+            icon=":material/download:",
+            key="sb_btn_export_options",
+            width="stretch",
+            type="primary" if active_view == "export_options" else "secondary",
+        ):
+            st.session_state["active_view"] = "export_options"
+            st.rerun()
+
+        # Resources Header & Items
+        render_html('<div class="sidebar-nav-header">RESOURCES</div>')
+
+        if st.sidebar.button(
+            "Supported Links",
+            icon=":material/link:",
+            key="sb_btn_supported_links",
+            width="stretch",
+            type="primary" if active_view == "supported_links" else "secondary",
+        ):
+            st.session_state["active_view"] = "supported_links"
+            st.rerun()
+
+        if st.sidebar.button(
+            "FAQ",
+            icon=":material/quiz:",
+            key="sb_btn_faq",
+            width="stretch",
+            type="primary" if active_view == "faq" else "secondary",
+        ):
+            st.session_state["active_view"] = "faq"
+            st.rerun()
+
+        if st.sidebar.button(
+            "Feedback",
+            icon=":material/rate_review:",
+            key="sb_btn_feedback",
+            width="stretch",
+            type="primary" if active_view == "feedback" else "secondary",
+        ):
+            st.session_state["active_view"] = "feedback"
+            st.rerun()
+
+        # Bottom Tip Card
         if is_result_page:
-            # Result page sidebar items (from Screenshot 1)
-            render_html(
-                f"""
-                <div class="sidebar-nav-group">
-                    <div class="sidebar-nav-item active">
-                        {ICON_HOME} <span>Home</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_TRANSCRIBE} <span>Transcribe</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_HISTORY} <span>History</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_EXPORT} <span>Export Options</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_CHAIN} <span>Supported Links</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_ABOUT} <span>About</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_FEEDBACK} <span>Feedback</span>
-                    </div>
-                </div>
-                """
-            )
-            # Bottom Card: Pro Tip
             render_html(
                 f"""
                 <div class="sidebar-tip-card">
@@ -137,39 +182,6 @@ def render_sidebar(is_result_page: bool = False) -> None:
                 """
             )
         else:
-            # Empty / Landing page sidebar items (from Screenshot 2)
-            render_html(
-                f"""
-                <div class="sidebar-nav-group">
-                    <div class="sidebar-nav-item active">
-                        {ICON_HOME} <span>Home</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_ABOUT} <span>About</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_HOW_IT_WORKS} <span>How it Works</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_EXPORT} <span>Export Options</span>
-                    </div>
-                </div>
-
-                <div class="sidebar-nav-header">RESOURCES</div>
-                <div class="sidebar-nav-group">
-                    <div class="sidebar-nav-item">
-                        {ICON_LINKS} <span>Supported Links</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_FAQ} <span>FAQ</span>
-                    </div>
-                    <div class="sidebar-nav-item">
-                        {ICON_FEEDBACK} <span>Feedback</span>
-                    </div>
-                </div>
-                """
-            )
-            # Bottom Card: Fast & Accurate
             render_html(
                 f"""
                 <div class="sidebar-tip-card">
@@ -183,6 +195,32 @@ def render_sidebar(is_result_page: bool = False) -> None:
                 </div>
                 """
             )
+
+
+def render_top_navigation_tabs(active_view: str = "transcribe") -> None:
+    """Render clickable horizontal navigation tabs at the top of the main area."""
+    view_map = {
+        "🎬 Transcribe": "transcribe",
+        "⚙️ How it Works": "how_it_works",
+        "🔗 Supported Links": "supported_links",
+        "💾 Export Options": "export_options",
+        "❓ FAQ": "faq",
+        "📖 About": "about",
+        "💬 Feedback": "feedback",
+    }
+    reverse_map = {v: k for k, v in view_map.items()}
+    current_label = reverse_map.get(active_view, "🎬 Transcribe")
+
+    selected_label = st.segmented_control(
+        "Navigation Tabs",
+        options=list(view_map.keys()),
+        default=current_label,
+        label_visibility="collapsed",
+        key="main_top_nav_segmented",
+    )
+    if selected_label and view_map.get(selected_label) != active_view:
+        st.session_state["active_view"] = view_map[selected_label]
+        st.rerun()
 
 
 # =============================================================================
