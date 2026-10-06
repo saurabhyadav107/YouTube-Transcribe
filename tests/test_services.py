@@ -119,12 +119,49 @@ class TestTranscriptService:
             TranscriptService.get_available_transcripts("dQw4w9WgXcQ")
         assert "unavailable" in exc_info.value.user_message.lower()
 
+    @patch.object(TranscriptService, "_get_innertube_captions_list")
     @patch.object(TranscriptService, "_get_transcript_list")
-    def test_network_connection_error_mapping(self, mock_get_list):
+    def test_network_connection_error_mapping(self, mock_get_list, mock_fallback):
         mock_get_list.side_effect = CouldNotRetrieveTranscript("dQw4w9WgXcQ")
+        mock_fallback.side_effect = CouldNotRetrieveTranscript("dQw4w9WgXcQ")
         with pytest.raises(NetworkConnectionError) as exc_info:
             TranscriptService.get_available_transcripts("dQw4w9WgXcQ")
         assert "connection" in exc_info.value.user_message.lower()
+
+    @patch.object(TranscriptService, "_get_innertube_captions_list")
+    @patch.object(TranscriptService, "_get_transcript_list")
+    def test_innertube_fallback_succeeds_for_available_transcripts(self, mock_get_list, mock_fallback):
+        from models.transcript_models import TranscriptLanguage
+        mock_get_list.side_effect = CouldNotRetrieveTranscript("dQw4w9WgXcQ")
+        mock_fallback.return_value = [
+            TranscriptLanguage(
+                language="English",
+                language_code="en",
+                is_generated=False,
+                is_translatable=True,
+                is_original=True,
+                is_translated=False,
+            )
+        ]
+        available = TranscriptService.get_available_transcripts("dQw4w9WgXcQ")
+        assert len(available) == 1
+        assert available[0].language_code == "en"
+        mock_fallback.assert_called_once_with("dQw4w9WgXcQ")
+
+    @patch.object(TranscriptService, "_get_innertube_transcript")
+    @patch.object(TranscriptService, "_get_transcript_list")
+    def test_innertube_fallback_succeeds_for_get_transcript(self, mock_get_list, mock_fallback):
+        mock_get_list.side_effect = CouldNotRetrieveTranscript("dQw4w9WgXcQ")
+        mock_res = MagicMock()
+        mock_fallback.return_value = mock_res
+        res = TranscriptService.get_transcript("dQw4w9WgXcQ", language_code="en")
+        assert res == mock_res
+        mock_fallback.assert_called_once_with("dQw4w9WgXcQ", "en")
+
+    def test_proxy_configuration_detection(self):
+        from services.transcript_service import get_configured_proxy_url
+        with patch.dict("os.environ", {"YOUTUBE_PROXY": "http://user:pass@proxy.com:8080"}):
+            assert get_configured_proxy_url() == "http://user:pass@proxy.com:8080"
 
     @patch.object(TranscriptService, "_get_transcript_list")
     def test_successful_transcript_extraction(self, mock_get_list):
